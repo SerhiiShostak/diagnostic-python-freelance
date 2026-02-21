@@ -2,28 +2,47 @@ import csv
 from pathlib import Path
 import re
 import datetime
-from dateutil import parser
 import dateparser
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 import json
+import argparse
+import logging
 
 BASE_DIR = Path(__file__).resolve().parent
-input_path = BASE_DIR / "data" / "input.csv"
-output_path = BASE_DIR / "out" / "clean.csv"
-report_path = BASE_DIR / "out" / "report.json"
-output_path.parent.mkdir(parents=True, exist_ok=True)
+# input_path = BASE_DIR / "data" / "input.csv"
+# output_path = BASE_DIR / "out" / "clean.csv"
+# report_path = BASE_DIR / "out" / "report.json"
+# output_path.parent.mkdir(parents=True, exist_ok=True)
+
+cli_parser = argparse.ArgumentParser()
+cli_parser.add_argument("--input", type=Path, default=BASE_DIR / "data" / "input.csv")
+cli_parser.add_argument("--output", type=Path, default=BASE_DIR / "out" / "clean.csv")
+cli_parser.add_argument("--report", type=Path, default=BASE_DIR / "out" / "report.json")
+
+args = cli_parser.parse_args()
+args.output.parent.mkdir(parents=True, exist_ok=True)
+args.report.parent.mkdir(parents=True, exist_ok=True)
+
+console_log = logging.StreamHandler()
+logging.basicConfig(
+    handlers=[console_log], 
+    level=logging.INFO, 
+    format='[%(asctime)s | %(levelname)s]: %(message)s', 
+    datefmt='%d.%m.%Y %H:%M:%S',
+    )
 
 def name_formatter(name: str) -> str:
-    if not name:
+    if not name or not name.strip():
         return ""
 
     name = " ".join(name.split())
     return name
     
 def phone_formatter(phone_number: str) -> str:
-    phone_number = re.sub(r'\D', '', phone_number)
-    if not phone_number:
+    if not phone_number or not phone_number.strip():
         return ""
+    
+    phone_number = re.sub(r'\D', '', phone_number)
     if len(phone_number) == 10 and phone_number[0] == '0':
         phone_number = '+38' + phone_number
         return phone_number
@@ -34,7 +53,7 @@ def phone_formatter(phone_number: str) -> str:
     return ""
 
 def email_formatter(email: str) -> str:
-    if not email:
+    if not email or not email.strip():
         return ""
     email = email.strip().lower()
     if re.match(r"^[^\s]*@[^\s]*\.[^\s]*$", email):
@@ -43,7 +62,7 @@ def email_formatter(email: str) -> str:
     return ""
 
 def date_formatter(date: str) -> str:
-    if not date:
+    if not date or not date.strip():
         return ""
     date = date.strip()
     try:
@@ -57,20 +76,27 @@ def date_formatter(date: str) -> str:
     return ""
 
 def amount_formatter(amount: str) -> str:
-    if not amount:
+    if not amount or not amount.strip():
+        return ""
+    currency_remove = ('uah', 'грн')
+    amount = amount.lower()
+    for cur in currency_remove:
+        amount = amount.replace(cur, '')
+    if re.search(r'[a-zA-Z]', amount):
         return ""
     amount = re.sub(r'[^0-9.,]', '', amount)
     if amount:
         try:
             amount = amount.replace(',', '.').split('.')
-
-            if len(amount) > 2:
+            if len(amount) == 2 and amount[0] and len(amount[0]) <= 3 and len(amount[1]) == 3:
+                parsed_amount = ''.join(amount)
+            elif len(amount) > 2:
                 parsed_amount = ''.join(amount[:-1]) + '.' + amount[-1]
             else:
                 parsed_amount = '.'.join(amount)
 
             return f"{Decimal(parsed_amount):.2f}"
-        except:
+        except (ValueError, TypeError, InvalidOperation):
             return ""
         
     return ""
@@ -119,11 +145,6 @@ def deduplicate_data(data: list) -> list:
         root = find(i)
         groups.setdefault(root, []).append(i)
 
-    # def get_key(index) -> tuple:
-    #     d = data[index]['created_at']
-    #     missing = 1 if not d else 0
-    #     d_for_sort = datetime.datetime.strptime(d, '%Y-%m-%d').max if d is None else d
-    #     return (missing, d_for_sort, index)
     def get_key(i):
         d = data[i]["created_at"]
         if not d:
@@ -140,7 +161,8 @@ def deduplicate_data(data: list) -> list:
 
     return deduplicated_rows
 
-with open(input_path, 'r') as f:
+with open(args.input, 'r') as f:
+    logging.info(f"Reading {args.input} file")
     reader = csv.DictReader(f)
     formatted_data = []
     report_dict = {
@@ -168,6 +190,7 @@ with open(input_path, 'r') as f:
             'created_at': date_formatter(row['created_at']),
             'amount': amount_formatter(row['amount'])
         })
+    logging.info(f"{report_dict['dropped_empty_rows']} empty rows removed")
 
     report_dict["rows_out"] = len(formatted_data)
     for person in formatted_data:
@@ -179,16 +202,25 @@ with open(input_path, 'r') as f:
             report_dict['invalid_dates'] += 1
         if not person['amount']:
             report_dict['invalid_amounts'] += 1
+    logging.info(f"{report_dict['invalid_phones']} invalid phones")
+    logging.info(f"{report_dict['invalid_emails']} invalid emails")
+    logging.info(f"{report_dict['invalid_dates']} invalid dates")
+    logging.info(f"{report_dict['invalid_amounts']} invalid amounts")
 
     final_data = deduplicate_data(formatted_data)
     report_dict["duplicates_removed"] = len(formatted_data) - len(final_data)
     report_dict["rows_out"] = len(final_data)
+    logging.info(f"{report_dict['duplicates_removed']} duplicates removed")
+    logging.info(f"{report_dict['rows_out']} rows left")
 
-with open(output_path, 'w') as f:
+with open(args.output, 'w') as f:
     writer = csv.DictWriter(f, fieldnames=['lead_id', 'name', 'phone', 'email', 'created_at', 'amount'])
     writer.writeheader()
     writer.writerows(final_data)
+logging.info(f"Cleaned data saved to {args.output}")
 
-with open(report_path, 'w') as f:
+with open(args.report, 'w') as f:
     json.dump(report_dict, f)
-        
+logging.info(f"Report saved to {args.report}")
+logging.info("Done")
+
