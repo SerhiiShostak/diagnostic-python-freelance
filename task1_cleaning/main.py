@@ -7,9 +7,11 @@ import dateparser
 from decimal import Decimal
 import json
 
-input_path = Path('task1_cleaning/data/input.csv')
-output_path = Path('task1_cleaning/out/clean.csv')
-report_path = Path('task1_cleaning/out/report.json')
+BASE_DIR = Path(__file__).resolve().parent
+input_path = BASE_DIR / "data" / "input.csv"
+output_path = BASE_DIR / "out" / "clean.csv"
+report_path = BASE_DIR / "out" / "report.json"
+output_path.parent.mkdir(parents=True, exist_ok=True)
 
 def name_formatter(name: str) -> str:
     if not name:
@@ -45,7 +47,7 @@ def date_formatter(date: str) -> str:
         return ""
     date = date.strip()
     try:
-        parsed_date = datetime.datetime.strptime(date)
+        parsed_date = datetime.datetime.strptime(date, '%Y-%m-%d')
     except:
         parsed_date = dateparser.parse(date, languages=['en', 'ru', 'uk'])
 
@@ -120,7 +122,7 @@ def deduplicate_data(data: list) -> list:
     def get_key(index) -> tuple:
         d = data[index]['created_at']
         missing = 1 if not d else 0
-        d_for_sort = datetime.date.max if d is None else d
+        d_for_sort = datetime.datetime.strptime(d, '%Y-%m-%d').max if d is None else d
         return (missing, d_for_sort, index)
     
     get_indices = []
@@ -142,6 +144,7 @@ with open(input_path, 'r') as f:
         "dropped_empty_rows": 0,
         "invalid_phones": 0,
         "invalid_emails": 0,
+        "invalid_dates": 0,
         "invalid_amounts": 0,
         "duplicates_removed": 0,
         }
@@ -167,6 +170,8 @@ with open(input_path, 'r') as f:
             report_dict['invalid_phones'] += 1
         if not person['email']:
             report_dict['invalid_emails'] += 1
+        if not person['created_at']:
+            report_dict['invalid_dates'] += 1
         if not person['amount']:
             report_dict['invalid_amounts'] += 1
 
