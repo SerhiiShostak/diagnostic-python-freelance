@@ -17,7 +17,6 @@ def name_formatter(name: str) -> str:
 
     name = " ".join(name.split())
     return name
-
     
 def phone_formatter(phone_number: str) -> str:
     phone_number = re.sub(r'\D', '', phone_number)
@@ -74,20 +73,20 @@ def amount_formatter(amount: str) -> str:
         
     return ""
 
-def deduplicate_data(data: list):
+def deduplicate_data(data: list) -> list:
     n = len(data)
-    parent = list(range(n)) #[0,1,2,3,4,5,6]
+    parent = list(range(n))
     size = [1] * n
     seen_phone = {}
     seen_email = {}
 
-    def find(x):
+    def find(x: int) -> int:
         while parent[x] != x:
             parent[x] = parent[parent[x]]
             x = parent[x]
         return x
 
-    def union(x, y):
+    def union(x: int, y: int) -> int:
         rx, ry = find(x), find(y)
         if rx == ry:
             return
@@ -118,10 +117,7 @@ def deduplicate_data(data: list):
         root = find(i)
         groups.setdefault(root, []).append(i)
 
-    # for i, v in groups.items():
-    #     print(f"Group {i}: {[data[i]['name'] for i in v]}")
-
-    def get_key(index):
+    def get_key(index) -> tuple:
         d = data[index]['created_at']
         missing = 1 if not d else 0
         d_for_sort = datetime.date.max if d is None else d
@@ -149,6 +145,7 @@ with open(input_path, 'r') as f:
         "invalid_amounts": 0,
         "duplicates_removed": 0,
         }
+    
     for row in reader:
         report_dict["rows_in"] += 1
         if not row['lead_id'].split() and not row['name'].split() and not row['phone'].split() and not row['email'].split() and not row['created_at'].split() and not row['amount'].split():
