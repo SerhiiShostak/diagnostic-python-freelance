@@ -36,7 +36,7 @@ def phone_formatter(phone_number: str) -> str:
 def email_formatter(email: str) -> str:
     if not email:
         return ""
-    email = email.strip()
+    email = email.strip().lower()
     if re.match(r"^[^\s]*@[^\s]*\.[^\s]*$", email):
         return email
     
@@ -119,11 +119,16 @@ def deduplicate_data(data: list) -> list:
         root = find(i)
         groups.setdefault(root, []).append(i)
 
-    def get_key(index) -> tuple:
-        d = data[index]['created_at']
-        missing = 1 if not d else 0
-        d_for_sort = datetime.datetime.strptime(d, '%Y-%m-%d').max if d is None else d
-        return (missing, d_for_sort, index)
+    # def get_key(index) -> tuple:
+    #     d = data[index]['created_at']
+    #     missing = 1 if not d else 0
+    #     d_for_sort = datetime.datetime.strptime(d, '%Y-%m-%d').max if d is None else d
+    #     return (missing, d_for_sort, index)
+    def get_key(i):
+        d = data[i]["created_at"]
+        if not d:
+            return (1, "9999-12-31", i)
+        return (0, d, i) 
     
     get_indices = []
     for root, indices in groups.items():
