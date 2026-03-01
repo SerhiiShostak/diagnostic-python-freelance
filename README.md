@@ -155,4 +155,3 @@ python task2_api/main.py \
 ## Notes
 
 - Output files are written to `task*/out/`.
-- For a “clean” repo history, it’s common to add `**/out/` to `.gitignore` and keep only sample outputs (optional).
