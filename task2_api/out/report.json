@@ -1,35 +1,35 @@
 {
-    "started_at": "22.02.2026 15:41:13",
-    "finished_at": "22.02.2026 15:41:13",
-    "duration_sec": 0.49998,
-    "endpoints": [
-        {
-            "url": "https://jsonplaceholder.typicode.com/posts",
-            "ok": true,
-            "status_code": 200,
-            "retries_used": 0,
-            "error": ""
-        },
-        {
-            "url": "https://jsonplaceholder.typicode.com/users",
-            "ok": true,
-            "status_code": 200,
-            "retries_used": 0,
-            "error": ""
-        },
-        {
-            "url": "https://jsonplaceholder.typicode.com/comments",
-            "ok": true,
-            "status_code": 200,
-            "retries_used": 0,
-            "error": ""
-        }
-    ],
-    "rows": {
-        "posts": 100,
-        "users": 10,
-        "comments": 500,
-        "posts_enriched": 1
+  "started_at": "2026-03-01T08:04:48",
+  "finished_at": "2026-03-01T08:04:49",
+  "duration_sec": 0.773035,
+  "endpoints": [
+    {
+      "url": "https://jsonplaceholder.typicode.com/posts",
+      "ok": true,
+      "status_code": 200,
+      "retries_used": 0,
+      "error": ""
     },
-    "warnings": []
+    {
+      "url": "https://jsonplaceholder.typicode.com/users",
+      "ok": true,
+      "status_code": 200,
+      "retries_used": 0,
+      "error": ""
+    },
+    {
+      "url": "https://jsonplaceholder.typicode.com/comments",
+      "ok": true,
+      "status_code": 200,
+      "retries_used": 0,
+      "error": ""
+    }
+  ],
+  "rows": {
+    "posts": 100,
+    "users": 10,
+    "comments": 500,
+    "posts_enriched": 100
+  },
+  "warnings": []
 }

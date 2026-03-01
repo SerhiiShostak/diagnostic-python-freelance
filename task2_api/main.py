@@ -1,207 +1,189 @@
 from pathlib import Path
 import argparse
-import json
-import requests
-import logging
 import csv
-from urllib3.util.retry import Retry
-from datetime import datetime
+import json
+import logging
 import time
+from datetime import datetime
+from collections import defaultdict
+
+import requests
+from requests import exceptions as rex
 
 POSTS_URL = "https://jsonplaceholder.typicode.com/posts"
 USERS_URL = "https://jsonplaceholder.typicode.com/users"
 COMMENTS_URL = "https://jsonplaceholder.typicode.com/comments"
-class FixedDelay(Retry):
-    def get_backoff_time(self):
-        return self.backoff_factor
 
-def create_session(retries=3, backoff_factor=1):
-    session = requests.Session()
-    retry_strategy = FixedDelay(
-        total=retries, 
-        backoff_factor=backoff_factor,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=['GET', 'POST'],
-        raise_on_status=False,
-        )
-    adapter = requests.adapters.HTTPAdapter(max_retries=retry_strategy)
-    session.mount('http://', adapter)
-    session.mount('https://', adapter)
-    return session
 
-def fetch_json(url, session, timeout=10, retries=3, sleep=1):
+def create_session() -> requests.Session:
+
+    return requests.Session()
+
+
+def fetch_json(url: str, session: requests.Session, timeout: int = 10, retries: int = 3, sleep: int = 1):
+
     endpoint = {
         "url": url,
         "ok": False,
-        "status_code": 0,
+        "status_code": 0, 
         "retries_used": 0,
         "error": "",
     }
-    
+
+    last_error = ""
+
     for attempt in range(retries + 1):
         try:
-            response = session.get(url, timeout=timeout)
-            endpoint["status_code"] = response.status_code
-            if 400 <= response.status_code < 500 and response.status_code != 429:
+            resp = session.get(url, timeout=timeout)
+            endpoint["status_code"] = resp.status_code
+
+            if 400 <= resp.status_code < 500 and resp.status_code != 429:
                 endpoint["ok"] = False
                 endpoint["retries_used"] = attempt
-                endpoint["error"] = response.reason
-
+                endpoint["error"] = f"http_{resp.status_code} {resp.reason}"
                 return None, endpoint
-            
-            if response.status_code == 429 or response.status_code >= 500:
-                raise requests.exceptions.RequestException(f"Retryable: {response.status_code} {response.reason}")
+
+            if resp.status_code == 429 or resp.status_code >= 500:
+                raise rex.RequestException(f"retryable http_{resp.status_code} {resp.reason}")
 
             try:
-                data = response.json()
+                data = resp.json()
             except ValueError as e:
-                raise requests.exceptions.RequestException(e)
-            
+                raise rex.RequestException(f"invalid_json: {e}")
+
             endpoint["ok"] = True
             endpoint["retries_used"] = attempt
             endpoint["error"] = ""
-
             return data, endpoint
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
-            logging.warning(f"fetch_json attempt {attempt + 1} failed for {url}: {str(e)}")
+
+        except (rex.Timeout, rex.ConnectionError, rex.RequestException) as e:
+            last_error = str(e)
+            logging.warning("fetch_json attempt %d/%d failed for %s: %s",
+                            attempt + 1, retries + 1, url, last_error)
+
             if attempt >= retries:
                 endpoint["ok"] = False
                 endpoint["retries_used"] = attempt
-                endpoint["error"] = str(e)
-
+                endpoint["error"] = last_error
                 return None, endpoint
-            
+
             time.sleep(sleep * (attempt + 1))
 
+    endpoint["error"] = last_error
     return None, endpoint
-    # try:
-    #     posts_request = session.get(POSTS_URL, timeout=timeout)
-    #     posts_json = posts_request.json()
-        
-    # except requests.exceptions.RequestException as e:
-    #     logging.warning(e)
-    #     report_dict["warnings"].append(e)
-    # finally:
-    #     posts_endpoint = {
-    #         "url": POSTS_URL,
-    #         "ok": posts_request.ok,
-    #         "status_code": posts_request.status_code,
-    #         "retries_used": len(posts_request.history),
-    #         "error": posts_request.reason,
-    #     }
-    #     report_dict["endpoints"].append(posts_endpoint)
 
 
 def main():
     BASE_DIR = Path(__file__).resolve().parent
 
-    cli_parser = argparse.ArgumentParser()
-    default_file_format = 'csv'
-    cli_parser.add_argument("--out_dir", type=Path, default=BASE_DIR / "out")
-    cli_parser.add_argument("--format", type=str, default=default_file_format)
-    cli_parser.add_argument("--timeout", type=str, default='10')
-    cli_parser.add_argument("--retries", type=str, default='3')
-    cli_parser.add_argument("--sleep", type=str, default='1')
+    parser = argparse.ArgumentParser(description="Task 2: Fetch + Normalize API data and write output + report.")
+    parser.add_argument("--out_dir", type=Path, default=BASE_DIR / "out")
+    parser.add_argument("--format", choices=["csv", "json"], default="csv")
+    parser.add_argument("--timeout", type=int, default=10)
+    parser.add_argument("--retries", type=int, default=3)
+    parser.add_argument("--sleep", type=int, default=1)
 
-    args = cli_parser.parse_args()
+    args = parser.parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    file_format = args.format
 
-    out_dir = args.out_dir / f"output.{file_format}"
+    logging.basicConfig(
+        level=logging.INFO,
+        format='[%(asctime)s | %(levelname)s]: %(message)s',
+        datefmt='%d.%m.%Y %H:%M:%S',
+    )
 
-    timeout = int(args.timeout)
-    retries = int(args.retries)
-    sleep = int(args.sleep)
-    report_dict = {
+    report = {
         "started_at": None,
         "finished_at": None,
         "duration_sec": None,
         "endpoints": [],
-        "rows": {
-            "posts": 0,
-            "users": 0,
-            "comments": 0,
-            "posts_enriched": 0,
-            },
+        "rows": {"posts": 0, "users": 0, "comments": 0, "posts_enriched": 0},
         "warnings": [],
     }
 
-    console_log = logging.StreamHandler()
-    logging.basicConfig(
-        handlers=[console_log],
-        level=logging.DEBUG,
-        format='[%(asctime)s | %(levelname)s]: %(message)s', 
-        datefmt='%d.%m.%Y %H:%M:%S',
-    )
-
     started_at = datetime.now()
-    logging.info(f"Started at {started_at}")
-    report_dict["started_at"] = started_at.strftime('%d.%m.%Y %H:%M:%S')
-    session = create_session(retries=retries, backoff_factor=sleep)
+    report["started_at"] = started_at.isoformat(timespec="seconds")
+    logging.info("Started at %s", report["started_at"])
 
-    posts_json, posts_endpoint = fetch_json(POSTS_URL, session, timeout=timeout, retries=retries, sleep=sleep)
-    report_dict["endpoints"].append(posts_endpoint)
+    session = create_session()
 
-    users_json, users_endpoint = fetch_json(USERS_URL, session, timeout=timeout, retries=retries, sleep=sleep)
-    report_dict["endpoints"].append(users_endpoint)
+    posts_json, posts_ep = fetch_json(POSTS_URL, session, timeout=args.timeout, retries=args.retries, sleep=args.sleep)
+    users_json, users_ep = fetch_json(USERS_URL, session, timeout=args.timeout, retries=args.retries, sleep=args.sleep)
+    comments_json, comments_ep = fetch_json(COMMENTS_URL, session, timeout=args.timeout, retries=args.retries, sleep=args.sleep)
 
-    comments_json, comments_endpoint = fetch_json(COMMENTS_URL, session, timeout=timeout, retries=retries, sleep=sleep)
-    report_dict["endpoints"].append(comments_endpoint)
-    post_enriched = {}
+    report["endpoints"].extend([posts_ep, users_ep, comments_ep])
+
+    report["rows"]["posts"] = len(posts_json) if isinstance(posts_json, list) else 0
+    report["rows"]["users"] = len(users_json) if isinstance(users_json, list) else 0
+    report["rows"]["comments"] = len(comments_json) if isinstance(comments_json, list) else 0
+
+    exit_code = 0
+    if posts_json is None:
+        report["warnings"].append("posts endpoint failed; output is empty")
+        logging.error("Failed to fetch posts; output will be empty.")
+        exit_code = 1
+
+    if users_json is None:
+        report["warnings"].append("users endpoint failed; user_name/user_email will be empty")
+
+    if comments_json is None:
+        report["warnings"].append("comments endpoint failed; comments_count will be 0")
+
+    user_map = {}
+    if isinstance(users_json, list):
+        user_map = {u.get("id"): (u.get("name"), u.get("email")) for u in users_json}
+
+    comment_counts = defaultdict(int)
+    if isinstance(comments_json, list):
+        for c in comments_json:
+            pid = c.get("postId")
+            if pid is not None:
+                comment_counts[pid] += 1
+
     output_list = []
-    if posts_json:
-        for post in posts_json:
-            post_enriched = {
-                'post_id': post['id'],
-                'title': post['title'],
-                'user_id': post['userId'],
-                'user_name': None,
-                'user_email': None,
-                'comments_count': 0,
-            }
+    if isinstance(posts_json, list):
+        for p in posts_json:
+            uid = p.get("userId")
+            name, email = user_map.get(uid, (None, None))
+            output_list.append({
+                "post_id": p.get("id"),
+                "title": p.get("title"),
+                "user_id": uid,
+                "user_name": name,
+                "user_email": email,
+                "comments_count": int(comment_counts.get(p.get("id"), 0)),
+            })
 
-        if users_json:
-            for user in users_json:
-                if user.get('id') and user.get('id') == post['userId']:
-                    post_enriched['user_name'] = user['name']
-                    post_enriched['user_email'] = user['email']
+    report["rows"]["posts_enriched"] = len(output_list)
 
-        if comments_json:
-            for comment in comments_json:
-                if comment.get('postId') == post.get('id'):
-                    post_enriched['comments_count'] += 1
-    else:
-        logging.error("Failed to fetch posts")
-        output_list.append(post_enriched)
+    out_file = args.out_dir / f"output.{args.format}"
+    fieldnames = ["post_id", "title", "user_id", "user_name", "user_email", "comments_count"]
 
-
-    output_list.append(post_enriched)
     try:
-        if file_format == 'csv':
-            with open(out_dir, 'w', encoding='utf-8', newline='') as f:
-                writer = csv.DictWriter(f, fieldnames=output_list[0].keys())
+        if args.format == "csv":
+            with open(out_file, "w", encoding="utf-8", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
                 writer.writerows(output_list)
-        elif file_format == 'json':
-            with open(out_dir, 'w', encoding='utf-8') as f:
-                json.dump(output_list, f)
         else:
-            raise Exception("Unsupported file format")
+            with open(out_file, "w", encoding="utf-8") as f:
+                json.dump(output_list, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        logging.error("Failed to write output file")
-        logging.error(e)
+        logging.error("Failed to write output file: %s", e)
+        report["warnings"].append(f"failed to write output file: {e}")
+        exit_code = max(exit_code, 1)
 
     finished_at = datetime.now()
-    report_dict["finished_at"] = finished_at.strftime('%d.%m.%Y %H:%M:%S')
-    report_dict["duration_sec"] = (finished_at - started_at).total_seconds()
-    report_dict["rows"]["posts"] = len(posts_json) if posts_json else 0
-    report_dict["rows"]["users"] = len(users_json) if users_json else 0
-    report_dict["rows"]["comments"] = len(comments_json) if comments_json else 0
-    report_dict["rows"]["posts_enriched"] = len(output_list) if posts_json else 0
+    report["finished_at"] = finished_at.isoformat(timespec="seconds")
+    report["duration_sec"] = (finished_at - started_at).total_seconds()
 
-    with open(args.out_dir / "report.json", 'w', encoding='utf-8') as f:
-        json.dump(report_dict, f, indent=4)
-    logging.info(f"Finished at {finished_at}")
+    report_file = args.out_dir / "report.json"
+    with open(report_file, "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
 
-if __name__ == '__main__':
-    main()  
+    logging.info("Finished at %s (duration %.3fs)", report["finished_at"], report["duration_sec"])
+    raise SystemExit(exit_code)
+
+
+if __name__ == "__main__":
+    main()
